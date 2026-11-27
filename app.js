@@ -23,6 +23,9 @@
     apercuId: '',
   };
   let serveur = false;
+  // Page publiée sur claude.ai : pas de serveur, téléchargements via la plateforme
+  const enLigne = !!(window.claude && typeof window.claude.use === 'function');
+  const capTelechargement = enLigne ? window.claude.use('downloads').catch(() => null) : Promise.resolve(null);
   let palette = [];
   let pastilleChoisie = '';
   let vue = 'pdf';
@@ -85,13 +88,35 @@
     return b + nomsFichiers(client).html;
   }
 
-  function telecharger(blob, nom) {
+  async function telecharger(blob, nom) {
+    const dl = await capTelechargement;
+    if (enLigne) {
+      if (!dl) throw new Error('les téléchargements ne sont pas disponibles dans cette vue');
+      try { await dl.save({ filename: nom, data: blob }); return true; } catch (e) {
+        if (e && e.code === 'declined') return false;
+        if (e && e.code === 'rate_limited') throw new Error('une autre demande de téléchargement est déjà ouverte');
+        throw new Error((e && e.message) || 'téléchargement impossible');
+      }
+    }
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = nom;
     document.body.appendChild(a);
     a.click();
     setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+    return true;
+  }
+
+  /* Confirmation dans la page : un premier clic arme le bouton, le second agit. */
+  function confirmer(bouton, texte, action) {
+    if (bouton.dataset.arme) {
+      clearTimeout(Number(bouton.dataset.arme));
+      delete bouton.dataset.arme;
+      return action();
+    }
+    const libelle = bouton.textContent;
+    bouton.textContent = texte;
+    bouton.dataset.arme = String(setTimeout(() => { bouton.textContent = libelle; delete bouton.dataset.arme; }, 4000));
   }
 
   function lireFichier(f) {
@@ -265,7 +290,7 @@
     const morceaux = [`${palette.length} couleurs`, r.polices.liste.length ? `${r.polices.liste.length} polices` : 'aucune police', `${r.logos.length} logo(s) possible(s)`];
     let msg = 'Trouvé : ' + morceaux.join(', ') + '. Vérifiez et ajustez ci-dessous.';
     if (!serveur && r.feuillesExternes.length && r.cssAnalyse < 4000) {
-      msg += ` La page utilise ${r.feuillesExternes.length} feuille(s) de style externe(s) non analysée(s) : les couleurs peuvent être incomplètes.`;
+      msg += ` Les couleurs sont sans doute incomplètes : la page charge ${r.feuillesExternes.length} feuille(s) de style à part. Ouvrez-en une (lien finissant par .css dans le code source), copiez son contenu et collez-le à la suite du code, puis relancez l'analyse.`;
     }
     statut('#charte-statut', msg, 'ok');
     // Premier logo exploitable
@@ -447,7 +472,7 @@
           <button type="button" data-a="modifier">Modifier</button>
           <button type="button" data-a="pdf">PDF</button>
           <button type="button" data-a="html">HTML</button>
-          ${c.email ? `<a href="mailto:${encodeURIComponent(c.email)}?subject=${sujet}&body=${corps}">E-mail</a>` : ''}
+          ${enLigne ? '<button type="button" data-a="copier">Copier le message</button>' : (c.email ? `<a href="mailto:${encodeURIComponent(c.email)}?subject=${sujet}&body=${corps}">E-mail</a>` : '')}
           <button type="button" data-a="suppr" class="suppr" aria-label="Supprimer ${C.echapper(C.nomComplet(c) || c.entreprise)}">✕</button>
         </div>`;
       const voir = () => { etat.apercuId = c.id; listeClients(); actualiser(); };
@@ -456,12 +481,17 @@
       li.querySelector('[data-a="modifier"]').addEventListener('click', () => modifierClient(c));
       li.querySelector('[data-a="pdf"]').addEventListener('click', (e) => unPdf(c, e.currentTarget));
       li.querySelector('[data-a="html"]').addEventListener('click', () => unHtml(c));
-      li.querySelector('[data-a="suppr"]').addEventListener('click', () => {
-        if (!confirm(`Supprimer ${C.nomComplet(c) || c.entreprise} ?`)) return;
+      const copier = li.querySelector('[data-a="copier"]');
+      if (copier) copier.addEventListener('click', () => {
+        const texte = (c.email ? `À : ${c.email}\n` : '') + `Objet : ${decodeURIComponent(sujet)}\n\n${decodeURIComponent(corps)}`;
+        const fini = (ok) => statut('#client-statut', ok ? `Message pour ${C.nomComplet(c) || c.entreprise} copié.` : 'Copie refusée par le navigateur.', ok ? 'ok' : 'erreur');
+        try { navigator.clipboard.writeText(texte).then(() => fini(true), () => fini(false)); } catch (e) { fini(false); }
+      });
+      li.querySelector('[data-a="suppr"]').addEventListener('click', (e) => confirmer(e.currentTarget, 'Supprimer ?', () => {
         etat.clients = etat.clients.filter((x) => x !== c);
         listeClients();
         actualiser();
-      });
+      }));
       ul.appendChild(li);
     });
     // Sélecteur de l'aperçu
@@ -612,10 +642,19 @@
 
   async function unPdf(client, bouton) {
     if (bouton) bouton.disabled = true;
-    try { telecharger(await genererPdf(client), nomsFichiers(client).pdf); } catch (e) { alert('PDF impossible : ' + e.message); }
+    statut('#apercu-statut', 'Création du PDF…');
+    try {
+      const ok = await telecharger(await genererPdf(client), nomsFichiers(client).pdf);
+      statut('#apercu-statut', ok ? 'PDF prêt.' : 'Téléchargement annulé.', ok ? 'ok' : '');
+    } catch (e) { statut('#apercu-statut', 'PDF impossible : ' + e.message, 'erreur'); }
     if (bouton) bouton.disabled = false;
   }
-  function unHtml(client) { telecharger(genererHtml(client), nomsFichiers(client).html); }
+  async function unHtml(client) {
+    try {
+      const ok = await telecharger(genererHtml(client), nomsFichiers(client).html);
+      statut('#apercu-statut', ok ? 'Carte animée prête.' : 'Téléchargement annulé.', ok ? 'ok' : '');
+    } catch (e) { statut('#apercu-statut', 'Téléchargement impossible : ' + e.message, 'erreur'); }
+  }
 
   function csvEnvoi() {
     const q = (v) => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
@@ -647,8 +686,8 @@
       zip.file('envoi.csv', csvEnvoi());
       statut('#export-statut', 'Compression…');
       const blob = await zip.generateAsync({ type: 'blob' });
-      telecharger(blob, `cartes-voeux-${etat.reglages.annee}.zip`);
-      statut('#export-statut', `${total} carte${total > 1 ? 's' : ''} exportée${total > 1 ? 's' : ''}.`, 'ok');
+      const ok = await telecharger(blob, `cartes-voeux-${etat.reglages.annee}.zip`);
+      statut('#export-statut', ok ? `${total} carte${total > 1 ? 's' : ''} exportée${total > 1 ? 's' : ''}.` : 'Téléchargement annulé.', ok ? 'ok' : '');
     } catch (e) {
       statut('#export-statut', 'Export interrompu : ' + e.message, 'erreur');
     } finally {
@@ -722,18 +761,17 @@
     $('#client-annuler').addEventListener('click', viderFormulaire);
     $('#client-analyser').addEventListener('click', analyserClient);
     $('#client-message-choix').addEventListener('change', (e) => { $('#client-message-perso').hidden = e.target.value !== 'perso'; });
-    $('#clients-vider').addEventListener('click', () => {
-      if (!confirm('Effacer tous les clients de la liste ?')) return;
+    $('#clients-vider').addEventListener('click', (e) => confirmer(e.currentTarget, 'Cliquez encore pour tout effacer', () => {
       etat.clients = [];
       listeClients();
       actualiser();
-    });
+    }));
     $('#csv-fichier').addEventListener('change', async (e) => {
       const f = e.target.files[0];
       if (!f) return;
       const buf = await f.arrayBuffer();
       let txt = new TextDecoder('utf-8').decode(buf);
-      if (txt.includes('�')) txt = new TextDecoder('windows-1252').decode(buf); // CSV d'Excel
+      if (txt.includes('\uFFFD')) txt = new TextDecoder('windows-1252').decode(buf); // CSV d'Excel
       $('#csv-texte').value = txt;
       e.target.value = '';
     });
@@ -769,14 +807,28 @@
     brancher();
     listeClients();
     actualiser();
-    serveur = await detecterServeur();
-    $('#mode').textContent = serveur ? 'Serveur local actif' : 'Mode hors serveur';
-    $('#aide-serveur').textContent = serveur
-      ? 'Le site est lu par le serveur local, feuilles de style comprises.'
-      : 'Pour analyser une simple adresse, lancez le serveur local : node outils/cartes-voeux/serveur.mjs. Sinon, utilisez l’onglet « Coller le code de ma page ».';
+    serveur = enLigne ? false : await detecterServeur();
+    if (enLigne) {
+      // Le navigateur n'a pas le droit de lire les autres sites depuis cette page
+      document.querySelector('.onglets').hidden = true;
+      document.querySelector('[data-panneau="adresse"]').remove();
+      $('#charte-base').closest('label').hidden = true;
+      $('#logos-proposes').hidden = true;
+      $('#client-site').closest('label').querySelector('#client-analyser').hidden = true;
+    }
+    $('#mode').textContent = enLigne ? 'Version en ligne' : serveur ? 'Serveur local actif' : 'Mode hors serveur';
+    if ($('#aide-serveur')) {
+      $('#aide-serveur').textContent = serveur
+        ? 'Le site est lu par le serveur local, feuilles de style comprises.'
+        : 'Pour analyser une simple adresse, lancez le serveur local (npm start). Sinon, utilisez l’onglet « Coller le code de ma page ».';
+    }
     $('#client-analyser').disabled = !serveur;
     $('#client-analyser').title = serveur ? '' : 'Nécessite le serveur local';
-    if (!serveur) document.querySelector('[data-onglet="code"]').click();
+    if (!serveur && !enLigne) document.querySelector('[data-onglet="code"]').click();
+    if (enLigne) {
+      document.querySelectorAll('.panneau').forEach((p) => { p.hidden = false; });
+      $('#logo-aide').hidden = false;
+    }
     if (!window.html2canvas || !window.jspdf || !window.JSZip) {
       statut('#export-statut', 'Les bibliothèques d’export ne se sont pas chargées : vérifiez votre connexion internet.', 'erreur');
     }
