@@ -1,0 +1,9 @@
+{
+  "name": "cartes-voeux",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Cartes de vœux personnalisées par client : PDF et pages HTML animées",
+  "type": "module",
+  "scripts": { "start": "node serveur.mjs" },
+  "engines": { "node": ">=18" }
+}

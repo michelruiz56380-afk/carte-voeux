@@ -1,0 +1,7 @@
+# Exports et listes de clients : à garder hors du dépôt
+*.zip
+*.csv
+exports/
+.DS_Store
+Thumbs.db
+node_modules/
