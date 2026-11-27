@@ -13,12 +13,12 @@ body{margin:0;background:var(--fond);color:var(--encre);font:15px/1.5 system-ui,
 h1,h2{margin:0;line-height:1.2}
 code{font-size:.9em;background:color-mix(in srgb,var(--ligne) 60%,transparent);padding:1px 5px;border-radius:4px}
 
-.entete{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap;padding:24px clamp(16px,3vw,32px) 8px}
+.entete{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap;padding-block:24px 8px;padding-left:max(16px,env(safe-area-inset-left,0px),3vw);padding-right:max(16px,env(safe-area-inset-right,0px),3vw)}
 .entete h1{font-size:1.6rem}
 .entete p{margin:4px 0 0;color:var(--doux)}
 .mode{font-size:.85rem;padding:4px 10px;border-radius:99px;border:1px solid var(--ligne)}
 
-.mise-en-page{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.05fr);gap:24px;padding:16px clamp(16px,3vw,32px) 48px;align-items:start}
+.mise-en-page{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.05fr);gap:24px;padding-block:16px 48px;padding-left:max(16px,env(safe-area-inset-left,0px),3vw);padding-right:max(16px,env(safe-area-inset-right,0px),3vw);align-items:start}
 @media (max-width:1000px){.mise-en-page{grid-template-columns:1fr}.apercu{position:static!important;order:-1}}
 .colonne{display:flex;flex-direction:column;gap:18px;min-width:0}
 
